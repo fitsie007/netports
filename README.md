@@ -5,6 +5,7 @@ Screenshot of visualization
 ![visualization screen shot](viz/images/viz_screen_shot.png)
 
 Zoomed image of  a single host
+(As can be seen from the image, we have some activity on port 8080 between 12 and 2 'o clock)
 ![visualization host screen shot](viz/images/single_host.png)
 
 
