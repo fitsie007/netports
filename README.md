@@ -8,7 +8,7 @@ Zoomed image of  a single host
 ![visualization host screen shot](viz/images/single_host.png)
 
 
-Zoomed image of  a side bar
+Zoomed image of the side bar
 ![visualization side bar](viz/images/side_bar.png)
 
 
