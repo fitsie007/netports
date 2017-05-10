@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<!-- 
+   NetPort Visualizer 
+   Author: Fitzroy Nembhard
+   Purpose: Visualize Netflows based on time within a 24-hour period for 6 given hosts (IP addresses)
+   Dependencies: map.json for geolocation (not yet implemented)
+                 blank_sample_json file for initializing svgs for 6 hosts * 4 ports * 288 time slots
+                 websocket feed with data of type json; format: {hostIndex: 0, portIndex: 0, timeSlotIndex: 26, bytes: 1488}
+-->
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+ <title>NetPort Visualizer</title>
+ <style type="text/css">
+  
+  html,
+  body {
+   font-family: Helvetica;
+   color: #FFFFFF;
+   font-size: 7px;
+   letter-spacing: 2px;
+   text-transform: uppercase;
+   margin: 0;
+   padding: 0;
+   background: #000;
+   /*   overflow: hidden;x*/
+   max-width: 100%;
+   overflow-x: hidden;
+   -moz-user-select: none;
+   -webkit-user-select: none;
+   -ms-user-select: none;
+   user-select: none;
+  }
+  
+  #main_screen {
+   width: 80%;
+   height: 100%;
+   min-height: 100%;
+   overflow: hidden;
+   margin: 0;
+   padding: 0;
+   float: left;
+  }
+  
+  #main_screen svg.host-svg {
+   margin: 0px 0px 5px 5px;
+   border: 1px solid #999999;
+   padding: 4px 0 4px 20px;
+  }
+  
+  #sidebar {
+   width: 375px;
+   height: 100%;
+   min-height: 100%;
+   margin: 0;
+   padding: 5px;
+   float: left;
+   background: #292929;
+   border: 1px solid #999999;
+   position: fixed;
+   right: 1px;
+  }
+  
+  #sidebar h3 {
+   background: grey;
+   padding: 3px;
+   border: 1px solid #000;
+  }
+  
+  #legend {
+   border: 1px solid steelblue;
+   background: #000;
+  }
+  
+  path {
+   stroke: #000;
+   stroke-width: 1px;
+   fill: grey;
+  }
+  
+  .port-scale text {
+   font: 6px sans-serif;
+   fill: #999999;
+   letter-spacing: 0px;
+  }
+  
+  .port-scale line,
+  .port-scale path {
+   fill: none;
+   stroke: #999999;
+   stroke-width: 0.9px;
+   shape-rendering: crispEdges;
+   color: #666666
+  }
+  
+  .port-text {
+   fill: red;
+   font-size: 7px;
+  }
+  
+  .host-text {
+   fill: red;
+   font-size: 12px;
+  }
+  
+  .gray-text {
+   fill: #cccccc
+  }
+ </style>
+</head>
+
+<body>
+ <div id="main_screen">
+ </div>
+
+
+ <div id="sidebar">
+  <div id="controls">
+   <h3>Controls</h3>
+   <p>Server
+    <input type="text" name="host" id="host" value="ws://localhost:8887" />
+    <input type="submit" name="host_connect" id="host_connect" value="Reconnect!" />
+   </p>
+  </div>
+
+  <div id="legend-container">
+   <h3>Legend</h3>
+  </div>
+
+  <div id="map-container">
+   <h3>Geolocation</h3>
+  </div>
+ </div>
+
+
+ <script src="/lib/jquery.min.js"></script>
+ <!-- <script src="lib/d3/d3.min.js"></script>-->
+ <script src="http://d3js.org/d3.v3.min.js" charset="utf-8"></script>
+ <script src="http://d3js.org/topojson.v0.min.js"></script>
+
+ <script type="text/javascript">
+  var ws;
+  var connectionMsg = "sendPackets";
+  var maxBytes = Number.MIN_SAFE_INTEGER,
+   minBytes = Number.MAX_SAFE_INTEGER;
+
+
+  $(document).ready(function () {
+
+   // test if the browser supports web sockets
+   if ("WebSocket" in window) {
+    console.log("Browser supports web sockets!");
+    connect($('#host').val()); //connect to socket upon page load
+    $('#console_send').removeAttr('disabled');
+   } else {
+    console.log("Browser does not support web sockets");
+   };
+
+   // function to send data on the web socket
+   function ws_send(str) {
+    try {
+     ws.send(str);
+    } catch (err) {
+     console.log(err);
+    }
+   }
+
+   // connect to the specified host
+   function connect(host) {
+    try {
+     ws = new WebSocket(host); // create the web socket
+    } catch (err) {
+     console.log(err);
+    }
+    $('#host_connect').attr('disabled', true); // disable the 'reconnect' button
+
+    ws.onopen = function () {
+     console.log("Connected...");
+    };
+    count = 0;
+    ws.onmessage = function (evt) {
+     var flow = JSON.parse(evt.data);
+//                    console.log(flow);
+     var bytes = flow.bytes;
+     var minopacity = 0.15;
+     var maxopacity = 1;
+     if (bytes > maxBytes)
+      maxBytes = bytes;
+     if (bytes < minBytes)
+      minBytes = bytes;
+
+     var alphaScale = d3.scale
+      .linear()
+      .domain([minBytes, maxBytes])
+      .range([minopacity, maxopacity]);
+
+
+     var temp_host = d3.select("[host-index='" + flow.hostIndex + "']"); //access the host for incoming message
+     var temp_port = temp_host.select("[port-index='" + flow.portIndex + "']"); //access the port slot for incoming message
+     var temp_time_slot = temp_port.select("[time-slot-index='" + flow.timeSlotIndex + "']"); //access the timeslot for incoming message
+
+     //update the bytes based on incoming message for a given host and port
+     if (temp_time_slot != null && temp_time_slot[0][0] != null) {
+      var bytes = temp_port.select("[time-slot-index='" + flow.timeSlotIndex + "']").attr("bytes");
+
+      if (!isNaN(bytes)) {
+       bytes = Number.parseInt(bytes) + Number.parseInt(flow.bytes);
+       temp_port.select("[time-slot-index='" + flow.timeSlotIndex + "']").attr("bytes", bytes);
+
+
+       //animate the opacity of the timeslot
+       temp_port.select("[time-slot-index='" + flow.timeSlotIndex + "']")
+        .transition()
+        .duration(30)
+        .style("opacity", function (d, i) {
+         return alphaScale(temp_port.select("[time-slot-index='" + flow.timeSlotIndex + "']").attr("bytes"))
+        });
+      }
+     }
+    }
+
+    ws.onclose = function () {
+     console.log("Socket Closed!");
+     $('#host_connect').attr('disabled', false); // re-enable the 'reconnect button
+    };
+   };
+
+   // the user clicked to 'reconnect' button
+   $('#host_connect').click(function () {
+    connect($('#host').val());
+   });
+
+  });
+ </script>
+
+ <script type="text/javascript">
+  
+  /*display a legend for trasitioning the timeslots by opacity*/
+  function displayLegend() {
+   //define width a height for legend
+   var w = 375,
+    h = 100,
+    rectWidth = 290;
+
+
+   //define svg for the sidebar legend
+   var key = d3.select("#legend-container").append("svg")
+    .attr({
+     width: w,
+     height: h,
+     id: "legend"
+    })
+
+
+   //Append a defs (for definition) element to your SVG
+   var defs = key.append("defs");
+
+   //Append a linearGradient element to the defs and give it a unique id
+   var linearGradient = defs.append("linearGradient")
+    .attr("id", "linear-gradient");
+
+   //Vertical gradient
+   linearGradient
+    .attr("x1", "0%")
+    .attr("y1", "0%")
+    .attr("x2", "0%")
+    .attr("y2", "100%");
+
+   //Set the color for the start (0%)
+   linearGradient.append("stop")
+    .attr("offset", "0%")
+    .attr("stop-opacity", 0.15)
+    .attr("stop-color", "#4682b4"); //steel blue
+
+   //Set the color for the start (0%)
+   linearGradient.append("stop")
+    .attr("offset", "100%")
+    .attr("stop-opacity", 1)
+    .attr("stop-color", "#4682b4"); //steel blue
+
+   //add a filled rectangle to show the gradient for the legend
+   key.append("g").append("rect")
+    .attr("width", rectWidth)
+    .attr("height", h)
+    .style("fill", "url(#linear-gradient)");
+
+   //add low traffic label
+   key.append("text")
+    .attr("x", rectWidth + 10)
+    .attr("y", 7)
+    .attr("dy", ".35em")
+    .text("low traffic")
+    .attr("class", "gray-text");
+
+   //add high traffic label
+   key.append("text")
+    .attr("x", rectWidth + 10)
+    .attr("y", h - 10)
+    .attr("dy", ".35em")
+    .text("high traffic")
+    .attr("class", "gray-text");
+  }
+
+  /*display a map in the sidebar for geolocation purposes*/
+  function drawMap() {
+   //define svg for the sidebar map
+   var info_svg = d3.select("#map-container").append("svg")
+    .attr({
+     width: 380,
+     height: 300
+    })
+    .append('g');
+
+   var projection = d3.geo.equirectangular()
+    .center([250, -100])
+    .scale(70)
+    .rotate([0, 0]);
+   var path = d3.geo.path()
+    .projection(projection);
+
+   // load and display the map
+   d3.json("/data/map.json", function (error, topology) {
+    info_svg.selectAll("path")
+     .data(topojson.object(topology, topology.objects.countries)
+      .geometries)
+     .enter()
+     .append("path")
+     .attr("d", path)
+   });
+  }
+
+
+  /*set up the main screen by adding svgs for timeslots based on port slots and hosts*/
+  function setupMainScreen() {
+   var data = d3.json("/data/blank_host_data.json", function (error, data) {
+
+
+    ///////*****************
+    // Define the margin, radius, and color scale. The color scale will be
+    // assigned by index, but if you define your data using objects, you could pass
+    // in a named field from the data object instead, such as `d.name`. Colors
+    // are assigned lazily, so if you want deterministic behavior, define a domain
+    // for the color scale.
+    var m = 5,
+     r = 100,
+     z = d3.scale.category20c();
+    var Hm = 40,
+     Hw = 500,
+    Hh = 240;
+    var border = 1;
+    var bordercolor = 'black';
+    
+    // Insert an svg element (with margin) for each row in our dataset. A child g
+    // element translates the origin to the rectangle center.
+    var svg = d3.select("#main_screen").selectAll("svg")
+     .data(data.children)
+
+    .enter().append('svg')
+
+    .attr("width", (Hw + Hm))
+     .attr("height", (Hh + Hm))
+     .attr("class", "host-svg")
+     .attr("host-index", function (d, i) {
+      //      console.log("host-index" + i);
+      return (i);
+     })
+     .append("g")
+
+
+    .each(function (d, i) {
+     var Pm = 60,
+      Pw = 500
+     Ph = 1000;
+     var svg2 = d3.select(this).selectAll('svg')
+      .data(d.children)
+      .enter().append('svg')
+      .attr('x', function (d, j) {
+       return j * 135;
+      })
+      .attr('y', function () {
+       return 40;
+      })
+      .attr('width', (Pw + Pm))
+      .attr('height', (Ph + Pm))
+      .attr("border", 1)
+
+     .attr("port-index", function (d, i) {
+       return (i);
+      })
+      .append("g")
+      //   .append("rect")
+      //.attr("x", 0)
+      //.attr("y", 0)
+      //.attr("height", Ph)
+      //.attr("width", Pw)
+      //    .style("stroke", bordercolor)
+      //.style("fill", "none")
+      //.style("stroke-width", border)
+      .each(function (d, i) {
+       //        console.log(d);
+       var result = d.children.map(function (a) {
+        return a.bytes;
+       });
+       //               console.log(result);
+       var barWidth = 8,
+        barPadding = 3,
+        ypos = 100,
+        xpos = 0;
+       var maxValue = d3.max(result);
+       var minValue = d3.min(result);
+       var minopacity = 0.15;
+       var maxopacity = 1;
+       //console.log(minopacity);
+       var opacityScale = d3.scale
+        .linear()
+        .domain([minValue, maxValue])
+        .range([minopacity, maxopacity]);
+
+
+       //add small squares to the ports rectangle
+       d3.select(this).selectAll('rect')
+        .data(d.children)
+        .enter()
+        .append('rect')
+        .style('opacity', function (d) {
+         //console.log(d.length);
+         return opacityScale(d.bytes);
+        })
+        .attr({
+         fill: 'steelblue',
+         transform: translator,
+         width: barWidth,
+         height: function (d) {
+          return 7;
+         },
+         bytes: function (d) {
+          return d.bytes;
+         }
+        })
+        .attr("time-slot-index", function (d, i) {
+         return (i);
+        })
+        .append("title").text(function (d) {
+         //console.log("title "+d.name);
+         return "name:" + d.name + "," + "length:" + d.bytes;
+        })
+
+       function yloc(d, k) {
+        if ((k + 1) % 12 === 1 && k > 1) {
+
+         return ypos = ypos - 9;
+        } else if (k == 0) {
+         return ypos = 100;
+        } else {
+         return ypos;
+        }
+       }
+
+       function translator(d, k) {
+        return "translate(" + xloc(d, k) + "," + ((yloc(d, k)) + 120) + ")";
+       }
+
+       function xloc(d, k) {
+        return ((k + 1) % 12 === 1 && k > 1) ? xpos = 0 : xpos = (k % 12) * (barWidth + barPadding);
+       }
+
+      });
+
+     //add port labels
+     svg2.append("text")
+      .attr("x", 40)
+      .attr("y", 5)
+      .attr("dy", ".35em")
+      .text(function (d) {
+       return d.name;
+      })
+      .attr("class", "port-text");
+
+     //define a scale for the time slots
+     var port_x_values = d3.scale.linear().range([0, 125]).domain([0, 60]);
+     var port_x_axis = d3.svg.axis().scale(port_x_values).orient("bottom");
+
+     //apend a scale to each port
+     svg2.append("g").attr("class", "port-scale")
+      .attr("transform", "translate(2, 230)").call(port_x_axis).append("text")
+      .attr("x", 500)
+      .attr("dy", ".71em")
+      .style("text-anchor", "end");
+     //      .text("axis title");
+     //      .attr("transform", "rotate(-90)")
+
+
+
+     //end border for host svg
+    })
+
+    .on('click', function (d, i, j) {
+     //var idx1 = +d3.select(this.parentNode.parentNode.parentNode.parentNode).attr("host-index");
+     //var idx2 = +d3.select(this.parentNode.parentNode).attr("host-index");
+     ////console.log("parentnode1:" + idx1 + "parentnode2:" + idx2);
+     //d3.csv("PacketData.csv", function (consdata) {
+
+     //    var filteredData = consdata.filter(function (d) {
+
+
+
+     //        if (d["Hostidx"] == idx1 && d["Portidx"] == idx2 && d["timeslot"] == i) {
+     //            console.log("Hostidx: " + d["Hostidx"]);
+     //            console.log("Portidx: " + d["Portidx"]);
+     //            console.log("ScrIp: " + d["ScrIp"]);
+     //            return d["ScrIp"];
+     //        }
+
+     //    });
+
+     //});
+     //console.log(d.name);
+
+     // });
+     //        d3.csv("cities.csv", function (error, cities) {
+     //            var translate = d3.transform(d3.select(this).attr("transform")).translate;
+     //            svg.append("svg:line")
+     //.attr("x1", translate[0]).attr("y1", translate[1])
+     //.attr("x2", function (d) {
+     //    return projection([d.lon, d.lat])[0];
+     //}).attr("y2", function (d) {
+     //    return projection([d.lon, d.lat])[1];
+     //})
+     //.style("stroke", "steelblue")
+     //.style("stroke-width", 3);
+     //        });
+
+
+     //end of square onclick
+    })
+    
+    
+    //define a scale for the time slots
+     var y = d3.scale.linear().range([0, 209]).domain([23, 0]);
+     var yAxis = d3.svg.axis().scale(y).orient("left").ticks(24);
+
+     //apend a scale to each host for a 24-hour period 
+     svg.append("g").attr("class", "port-scale")
+      .attr("transform", "translate(-2, 55)").call(yAxis).append("text")
+      .attr("dy", ".71em")
+      .style("text-anchor", "end");
+
+    //add the ip addresses for each host
+    svg.append("text")
+     .attr("x", 250)
+     .attr("y", 20)
+     .attr("dy", ".35em")
+     .text(function (d) {
+      return d.name;
+     })
+     .attr("class", "host-text");
+   })
+  }
+ </script>
+
+
+
+ <script type="text/javascript">
+  setupMainScreen();//set up the main screen for the hosts
+  displayLegend(); //display a legend in the sidebar
+  drawMap(); //draw the map in the side panel
+ </script>
+</body>
+
+</html>
